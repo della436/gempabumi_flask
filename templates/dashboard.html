@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gempa Bumi Dunia</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+  <header><div><span class="eyebrow">VISUALISASI DATA · FLASK</span><h1>Gempa Bumi Dunia</h1><p>Jelajahi lokasi, kekuatan, dan kejadian gempa terkuat.</p></div><div class="live"><i></i> Dataset USGS</div></header>
+  <main>
+    <section class="cards" aria-label="Ringkasan data">
+      <article class="card"><span>Total data gempa</span><strong id="total">{{ "{:,.0f}".format(total) }}</strong><small>kejadian pada dataset</small></article>
+      <article class="card"><span>Magnitudo terbesar</span><strong id="max-mag">{{ "%.1f"|format(max_mag) }}</strong><small>magnitudo tercatat</small></article>
+      <article class="card"><span>Rata-rata magnitudo</span><strong id="avg-mag">—</strong><small>sesuai filter aktif</small></article>
+    </section>
+    <section class="panel filters">
+      <div><h2>Filter magnitudo</h2><p>Atur rentang gempa yang ingin ditampilkan.</p></div>
+      <label>Minimum <input id="min-mag" type="number" min="0" max="10" step="0.1" value="2"></label>
+      <label>Maksimum <input id="max-mag-input" type="number" min="0" max="10" step="0.1" value="8"></label>
+      <button id="apply">Terapkan filter</button>
+      <span class="result-count"><b id="filtered-total">—</b> kejadian</span>
+    </section>
+    <section class="grid">
+      <article class="panel map-panel"><div class="panel-title"><div><h2>Peta lokasi gempa</h2><p>Ukuran titik menunjukkan kekuatan gempa; klik titik untuk melihat detail.</p></div><span class="legend-dot">● Gempa &nbsp; <span class="strong-legend">● Magnitudo ≥ 5</span></span></div><div id="map"></div></article>
+      <article class="panel chart-panel"><div class="panel-title"><div><h2>Distribusi magnitudo</h2><p>Jumlah kejadian pada tiap rentang.</p></div></div><div class="chart-wrap"><canvas id="chart"></canvas></div></article>
+    </section>
+    <section class="panel strongest-panel"><div class="panel-title"><div><h2>10 gempa terkuat</h2><p>Lokasi dengan magnitudo tertinggi dalam filter saat ini.</p></div></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Lokasi</th><th>Magnitudo</th><th>Kedalaman</th></tr></thead><tbody id="strongest-rows"></tbody></table></div></section>
+    <p class="source-note">Data contoh dari <a href="https://earthquake.usgs.gov/earthquakes/feed/v1.0/csv.php" target="_blank" rel="noreferrer">USGS Earthquake Hazards Program</a>. Peta dasar © OpenStreetMap.</p>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const map = L.map('map', {preferCanvas: true}).setView([15, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 18, attribution: '&copy; OpenStreetMap'}).addTo(map);
+    const layer = L.layerGroup().addTo(map);
+    const chart = new Chart(document.getElementById('chart'), {
+      type: 'doughnut', data: {labels: [], datasets: [{label: 'Jumlah gempa', data: [], backgroundColor: ['#168f80','#54b7a7','#8cd2bf','#f0b35c','#ed805d','#586d78'], borderColor:'#fff', borderWidth:3}]},
+      options: {responsive: true, maintainAspectRatio: false, cutout:'62%', plugins: {legend: {position:'bottom', labels:{usePointStyle:true, boxWidth:8, padding:15}}}}
+    });
+    const fmt = new Intl.NumberFormat('id-ID');
+    async function refresh() {
+      const min = document.getElementById('min-mag').value || 0;
+      const max = document.getElementById('max-mag-input').value || 10;
+      const response = await fetch(`/api/earthquakes?min_mag=${encodeURIComponent(min)}&max_mag=${encodeURIComponent(max)}`);
+      const result = await response.json();
+      document.getElementById('filtered-total').textContent = fmt.format(result.total);
+      document.getElementById('max-mag').textContent = result.max_mag ?? '—';
+      document.getElementById('avg-mag').textContent = result.average_mag ?? '—';
+      chart.data.labels = result.labels; chart.data.datasets[0].data = result.counts; chart.update();
+      const rows = document.getElementById('strongest-rows');
+      rows.replaceChildren();
+      result.strongest.forEach((quake, index) => {
+        const row = document.createElement('tr');
+        const rank = document.createElement('td'); rank.textContent = String(index + 1);
+        const place = document.createElement('td'); place.textContent = quake.place || 'Lokasi tidak diketahui';
+        const magnitude = document.createElement('td'); magnitude.textContent = Number(quake.mag).toFixed(1);
+        const depth = document.createElement('td'); depth.textContent = quake.depth == null ? '—' : `${Number(quake.depth).toFixed(1)} km`;
+        row.append(rank, place, magnitude, depth); rows.append(row);
+      });
+      layer.clearLayers();
+      result.points.forEach(point => {
+        const radius = Math.max(3, Math.min(12, 3 + point.mag * 1.25));
+        L.circleMarker([point.latitude, point.longitude], {radius, color: '#fff', weight: 1, fillColor: point.mag >= 5 ? '#ed7652' : '#168f80', fillOpacity: 0.75})
+          .bindPopup(`<b>M ${point.mag}</b><br>${point.place || 'Lokasi tidak diketahui'}<br>Kedalaman: ${point.depth ?? '—'} km<br>${point.time || ''}`).addTo(layer);
+      });
+    }
+    document.getElementById('apply').addEventListener('click', refresh);
+    refresh();
+  </script>
+</body>
+</html>
